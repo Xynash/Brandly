@@ -35,3 +35,8 @@ def test_samples_are_wrapped_as_examples_not_instructions():
 def test_extra_instruction_is_appended():
     built = build_prompt(HubContext(client_name="Acme"), "Hi", extra_instruction="Be stricter.")
     assert built.system.endswith("Be stricter.")
+
+
+def test_forbids_inventing_facts():
+    built = build_prompt(HubContext(client_name="Acme"), "Hi")
+    assert "Never invent facts" in built.system

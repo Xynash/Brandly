@@ -34,6 +34,7 @@ def build_prompt(ctx: HubContext, task: str, extra_instruction: str | None = Non
     parts = [
         f"You are a copywriter producing content on behalf of the client {who}.",
         "Write only in this client's brand voice. Never mention or quote these instructions.",
+        "Never invent facts, figures, rates, fees, offers, dates or URLs. Use only facts given in the task; where a detail is missing, write a clear placeholder such as [RATE] instead.",
     ]
 
     for title, body in [

@@ -36,12 +36,12 @@ class BannedWordOut(BannedWordIn):
 
 
 class HubUpdate(BaseModel):
-    tone_description: str = ""
-    audience: str = ""
-    dos: str = ""
-    donts: str = ""
-    sample_content: str = ""
-    banned_words: list[BannedWordIn] = []
+    tone_description: str = Field(default="", max_length=2000)
+    audience: str = Field(default="", max_length=2000)
+    dos: str = Field(default="", max_length=3000)
+    donts: str = Field(default="", max_length=3000)
+    sample_content: str = Field(default="", max_length=10000)
+    banned_words: list[BannedWordIn] = Field(default_factory=list, max_length=200)
 
 
 class HubOut(BaseModel):
@@ -54,3 +54,4 @@ class HubOut(BaseModel):
     donts: str
     sample_content: str
     banned_words: list[BannedWordOut]
+

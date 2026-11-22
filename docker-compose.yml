@@ -1,0 +1,15 @@
+services:
+  db:
+    image: postgres:16
+    container_name: brandly-db
+    environment:
+      POSTGRES_USER: brandly
+      POSTGRES_PASSWORD: brandly
+      POSTGRES_DB: brandly
+    ports:
+      - "5433:5432"
+    volumes:
+      - brandly_pgdata:/var/lib/postgresql/data
+
+volumes:
+  brandly_pgdata:

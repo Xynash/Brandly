@@ -6,6 +6,7 @@ class Settings(BaseSettings):
     llm_provider: str = "gemini"  # gemini | mock
     gemini_api_key: str = ""
     gemini_model: str = "gemini-3.5-flash"
+    gemini_fallback_model: str = "gemini-2.5-flash"  # tried when the main model keeps failing
     model_config = SettingsConfigDict(env_file=".env")
 
 

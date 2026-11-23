@@ -12,10 +12,14 @@ class Boom(Exception):
 class FakeModels:
     def __init__(self, outcomes):
         self.outcomes = list(outcomes)
-        self.calls = 0
+        self.models_used = []
+
+    @property
+    def calls(self):
+        return len(self.models_used)
 
     def generate_content(self, **kwargs):
-        self.calls += 1
+        self.models_used.append(kwargs["model"])
         outcome = self.outcomes.pop(0)
         if isinstance(outcome, Exception):
             raise outcome
@@ -28,11 +32,11 @@ class FakeTypes:
         return kwargs
 
 
-def make_provider(outcomes):
+def make_provider(outcomes, models=("m1",)):
     p = GeminiProvider.__new__(GeminiProvider)  # skip __init__ so no SDK or key is needed
     p._client = type("Client", (), {"models": FakeModels(outcomes)})()
     p._types = FakeTypes
-    p._model = "test-model"
+    p._models = list(models)
     p.base_delay = 0
     return p
 
@@ -43,15 +47,21 @@ def test_retries_a_503_then_succeeds():
     assert p._client.models.calls == 2
 
 
-def test_gives_up_after_three_attempts():
-    p = make_provider([Boom(503), Boom(503), Boom(503)])
+def test_falls_back_to_second_model_after_repeated_503():
+    p = make_provider([Boom(503), Boom(503), "from fallback"], models=("m1", "m2"))
+    assert p.generate("sys", "user") == "from fallback"
+    assert p._client.models.models_used == ["m1", "m1", "m2"]
+
+
+def test_gives_up_when_every_model_fails():
+    p = make_provider([Boom(503)] * 4, models=("m1", "m2"))
     with pytest.raises(LLMError):
         p.generate("sys", "user")
-    assert p._client.models.calls == 3
+    assert p._client.models.calls == 4
 
 
 def test_does_not_retry_a_client_error():
-    p = make_provider([Boom(400)])
+    p = make_provider([Boom(400)], models=("m1", "m2"))
     with pytest.raises(LLMError):
         p.generate("sys", "user")
     assert p._client.models.calls == 1

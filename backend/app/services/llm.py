@@ -16,32 +16,42 @@ class LLMProvider(Protocol):
 
 class GeminiProvider:
     name = "gemini"
-    retries = 3  # total attempts
-    base_delay = 2.0  # seconds; waits 2s, then 4s
+    attempts_per_model = 2
+    base_delay = 2.0  # seconds to wait before the second attempt on the same model
 
-    def __init__(self, api_key: str, model: str):
+    def __init__(self, api_key: str, model: str, fallback_model: str = ""):
         from google import genai  # imported here so tests and mock mode never need the SDK
         from google.genai import types
 
         self._client = genai.Client(api_key=api_key)
         self._types = types
-        self._model = model
+        self._models = [model]
+        if fallback_model and fallback_model != model:
+            self._models.append(fallback_model)
 
     def generate(self, system: str, user: str) -> str:
-        for attempt in range(1, self.retries + 1):
-            try:
-                resp = self._client.models.generate_content(
-                    model=self._model,
-                    contents=user,
-                    config=self._types.GenerateContentConfig(system_instruction=system),
-                )
+        resp = None
+        last_exc: Exception | None = None
+        for model in self._models:
+            for attempt in range(1, self.attempts_per_model + 1):
+                try:
+                    resp = self._client.models.generate_content(
+                        model=model,
+                        contents=user,
+                        config=self._types.GenerateContentConfig(system_instruction=system),
+                    )
+                    break
+                except Exception as exc:
+                    code = getattr(exc, "code", None)
+                    if code not in RETRYABLE_CODES:
+                        raise LLMError(f"Gemini request failed: {exc}") from exc
+                    last_exc = exc
+                    if attempt < self.attempts_per_model:
+                        time.sleep(self.base_delay)
+            if resp is not None:
                 break
-            except Exception as exc:
-                code = getattr(exc, "code", None)
-                if code in RETRYABLE_CODES and attempt < self.retries:
-                    time.sleep(self.base_delay * attempt)
-                    continue
-                raise LLMError(f"Gemini request failed: {exc}") from exc
+        if resp is None:
+            raise LLMError(f"Gemini request failed: {last_exc}") from last_exc
         text = (resp.text or "").strip()
         if not text:
             raise LLMError("Gemini returned no text (it may have been blocked by safety filters)")
@@ -62,4 +72,4 @@ def get_provider() -> LLMProvider:
         return MockProvider()
     if not settings.gemini_api_key:
         raise LLMError("GEMINI_API_KEY is not set in backend/.env")
-    return GeminiProvider(settings.gemini_api_key, settings.gemini_model)
+    return GeminiProvider(settings.gemini_api_key, settings.gemini_model, settings.gemini_fallback_model)

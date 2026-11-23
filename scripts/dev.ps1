@@ -14,6 +14,11 @@ if ($row) {
 
 function global:Gen([string]$Task) {
   $body = @{ task = $Task } | ConvertTo-Json
-  $r = Invoke-WebRequest -UseBasicParsing -Method Post -Uri "$global:base/clients/$global:cid/generate" -Headers $global:h -ContentType "application/json" -Body $body
+  try {
+    $r = Invoke-WebRequest -UseBasicParsing -Method Post -Uri "$global:base/clients/$global:cid/generate" -Headers $global:h -ContentType "application/json" -Body $body
+  } catch {
+    Write-Warning ("Generate failed: " + $_.ErrorDetails.Message)
+    return $null
+  }
   [Text.Encoding]::UTF8.GetString($r.RawContentStream.ToArray()) | ConvertFrom-Json
 }

@@ -17,7 +17,9 @@ function global:Gen([string]$Task) {
   try {
     $r = Invoke-WebRequest -UseBasicParsing -Method Post -Uri "$global:base/clients/$global:cid/generate" -Headers $global:h -ContentType "application/json" -Body $body
   } catch {
-    Write-Warning ("Generate failed: " + $_.ErrorDetails.Message)
+    $msg = $_.ErrorDetails.Message
+    if (-not $msg) { $msg = $_.Exception.Message }
+    Write-Warning ("Generate failed: " + $msg)
     return $null
   }
   [Text.Encoding]::UTF8.GetString($r.RawContentStream.ToArray()) | ConvertFrom-Json

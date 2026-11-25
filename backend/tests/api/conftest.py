@@ -128,9 +128,12 @@ class FakeProvider:
         self.replies = ["A calm, clear draft."]
         self.calls = []
         self.error = None
+        self.on_call = None
 
     def generate(self, system, user):
         self.calls.append((system, user))
+        if self.on_call:
+            self.on_call()
         if self.error:
             raise self.error
         return self.replies.pop(0) if len(self.replies) > 1 else self.replies[0]
@@ -141,3 +144,4 @@ def fake_llm(monkeypatch):
     provider = FakeProvider()
     monkeypatch.setattr("app.routers.generate.get_provider", lambda: provider)
     return provider
+

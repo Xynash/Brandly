@@ -12,14 +12,18 @@ class Boom(Exception):
 class FakeModels:
     def __init__(self, outcomes):
         self.outcomes = list(outcomes)
-        self.models_used = []
+        self.kwargs = []
+
+    @property
+    def models_used(self):
+        return [k["model"] for k in self.kwargs]
 
     @property
     def calls(self):
-        return len(self.models_used)
+        return len(self.kwargs)
 
     def generate_content(self, **kwargs):
-        self.models_used.append(kwargs["model"])
+        self.kwargs.append(kwargs)
         outcome = self.outcomes.pop(0)
         if isinstance(outcome, Exception):
             raise outcome
@@ -31,12 +35,17 @@ class FakeTypes:
     def GenerateContentConfig(**kwargs):
         return kwargs
 
+    @staticmethod
+    def HttpOptions(**kwargs):
+        return kwargs
+
 
 def make_provider(outcomes, models=("m1",)):
     p = GeminiProvider.__new__(GeminiProvider)  # skip __init__ so no SDK or key is needed
     p._client = type("Client", (), {"models": FakeModels(outcomes)})()
     p._types = FakeTypes
     p._models = list(models)
+    p._timeout_ms = 25000
     p.base_delay = 0
     return p
 
@@ -65,3 +74,41 @@ def test_does_not_retry_a_client_error():
     with pytest.raises(LLMError):
         p.generate("sys", "user")
     assert p._client.models.calls == 1
+
+
+def test_every_request_carries_a_timeout():
+    p = make_provider(["ok"])
+    p.generate("sys", "user")
+    config = p._client.models.kwargs[0]["config"]
+    assert config["http_options"] == {"timeout": 25000}
+    assert config["system_instruction"] == "sys"
+
+
+def test_stops_retrying_once_the_time_budget_is_spent():
+    p = make_provider([Boom(503), "never reached"], models=("m1", "m2"))
+    p.total_budget = -1
+    with pytest.raises(LLMError) as exc:
+        p.generate("sys", "user")
+    assert "gave up" in str(exc.value)
+    assert p._client.models.calls == 1
+
+
+def test_a_retired_model_falls_through_to_the_next_model_without_retrying():
+    p = make_provider([Boom(404), "from fallback"], models=("m1", "m2"))
+    assert p.generate("sys", "user") == "from fallback"
+    assert p._client.models.models_used == ["m1", "m2"]
+
+
+def test_fails_clearly_when_every_model_is_unavailable():
+    p = make_provider([Boom(404), Boom(404)], models=("m1", "m2"))
+    with pytest.raises(LLMError) as exc:
+        p.generate("sys", "user")
+    assert "error 404" in str(exc.value)
+    assert p._client.models.calls == 2
+
+
+def test_a_later_hard_error_still_mentions_the_earlier_failure():
+    p = make_provider([Boom(503), Boom(503), Boom(400)], models=("m1", "m2"))
+    with pytest.raises(LLMError) as exc:
+        p.generate("sys", "user")
+    assert "error 400" in str(exc.value) and "error 503" in str(exc.value)

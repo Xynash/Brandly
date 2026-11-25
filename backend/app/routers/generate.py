@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.core.db import get_db
 from app.core.deps import get_agency
 from app.models import Agency, Template
@@ -13,12 +14,26 @@ from app.schemas.scan import ViolationOut
 from app.services.context import build_context
 from app.services.generation import generate_checked
 from app.services.llm import LLMError, get_provider
+from app.services.ratelimit import SlidingWindowLimiter
 from app.services.templating import MissingVariables, render
 
 router = APIRouter(prefix="/clients", tags=["generate"])
 
+generate_limiter = SlidingWindowLimiter(window_seconds=60)
 
-@router.post("/{client_id}/generate", response_model=GenerateOut)
+
+def _rate_limit(agency: Agency = Depends(get_agency)) -> None:
+    """Protects the Gemini quota: each agency gets a fixed number of generations per minute."""
+    wait = generate_limiter.hit(str(agency.id), settings.generate_rate_limit_per_minute)
+    if wait is not None:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Too many generation requests. Try again in {wait} seconds.",
+            headers={"Retry-After": str(wait)},
+        )
+
+
+@router.post("/{client_id}/generate", response_model=GenerateOut, dependencies=[Depends(_rate_limit)])
 def generate(
     client_id: uuid.UUID,
     payload: GenerateIn,
@@ -44,6 +59,8 @@ def generate(
         task = payload.task
 
     ctx, banned = build_context(client)
+    db.close()  # everything needed is copied out; free the DB connection before the slow model call
+
     try:
         result = generate_checked(get_provider(), ctx, task, banned)
     except LLMError as exc:

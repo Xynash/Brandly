@@ -13,6 +13,7 @@ from app.schemas.generate import GenerateIn, GenerateOut
 from app.schemas.scan import ViolationOut
 from app.services.context import build_context
 from app.services.generation import generate_checked
+from app.services.history import save_generation
 from app.services.llm import LLMError, get_provider
 from app.services.ratelimit import SlidingWindowLimiter
 from app.services.templating import MissingVariables, render
@@ -40,7 +41,7 @@ def generate(
     agency: Agency = Depends(get_agency),
     db: Session = Depends(get_db),
 ):
-    """Build the client's prompt, call the model, scan the draft, retry once if needed.
+    """Build the client's prompt, call the model, scan the draft, retry once if needed, save it.
 
     The task is either given directly, or rendered from a template plus the writer's values."""
     client = _get_client(db, agency, client_id)
@@ -59,13 +60,23 @@ def generate(
         task = payload.task
 
     ctx, banned = build_context(client)
+    agency_id, client_id_value = agency.id, client.id  # copy out before the session is released
     db.close()  # everything needed is copied out; free the DB connection before the slow model call
 
     try:
         result = generate_checked(get_provider(), ctx, task, banned)
     except LLMError as exc:
         raise HTTPException(status_code=502, detail=str(exc))
+    generation_id = save_generation(
+        db,
+        agency_id=agency_id,
+        client_id=client_id_value,
+        template_id=payload.template_id,
+        task=task,
+        result=result,
+    )
     return GenerateOut(
+        id=generation_id,
         text=result.text,
         passed=result.scan.passed,
         flagged=result.flagged,

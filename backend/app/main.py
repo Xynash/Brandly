@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.db import get_db
 from app.core.logging_setup import setup_logging
-from app.routers import agencies, clients, generate, prompts, scan, templates
+from app.routers import agencies, clients, generate, history, prompts, scan, templates
 
 setup_logging()
 logger = logging.getLogger("brandly")
@@ -25,6 +25,7 @@ app.include_router(prompts.router)
 app.include_router(scan.router)
 app.include_router(generate.router)
 app.include_router(templates.router)
+app.include_router(history.router)
 
 
 @app.middleware("http")
@@ -69,3 +70,4 @@ app.add_middleware(
 def health(db: Session = Depends(get_db)):
     db.execute(text("SELECT 1"))
     return {"status": "ok", "db": "connected"}
+

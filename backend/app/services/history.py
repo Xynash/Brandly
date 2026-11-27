@@ -17,6 +17,7 @@ def save_generation(
     template_id: uuid.UUID | None,
     task: str,
     result: GenerationResult,
+    user_id: uuid.UUID | None = None,
 ) -> uuid.UUID | None:
     """Store one generation and return its id.
 
@@ -26,6 +27,7 @@ def save_generation(
         client_id=client_id,
         template_id=template_id,
         task=task,
+        user_id=user_id,
         output=result.text,
         passed=result.scan.passed,
         flagged=result.flagged,

@@ -21,7 +21,7 @@ class GenerateIn(BaseModel):
 
 class GenerateOut(BaseModel):
     id: uuid.UUID | None = None  # saved history id; None only if saving failed
-    text: str
+    text: str | None
     passed: bool
     flagged: bool  # True means still non-compliant after the retry; needs human review
     attempts: int

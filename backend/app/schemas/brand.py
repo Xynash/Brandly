@@ -41,6 +41,7 @@ class HubUpdate(BaseModel):
     dos: str = Field(default="", max_length=3000)
     donts: str = Field(default="", max_length=3000)
     sample_content: str = Field(default="", max_length=10000)
+    preset_ids: list[str] = Field(default_factory=list, max_length=20)
     banned_words: list[BannedWordIn] = Field(default_factory=list, max_length=200)
 
 
@@ -53,5 +54,6 @@ class HubOut(BaseModel):
     dos: str
     donts: str
     sample_content: str
+    preset_ids: list[str] = Field(default_factory=list, max_length=20)
     banned_words: list[BannedWordOut]
 

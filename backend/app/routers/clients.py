@@ -6,9 +6,11 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.db import get_db
-from app.core.deps import get_agency
+from app.core.deps import get_agency, require_admin
 from app.models import Agency, BannedWord, BrandHub, Client
 from app.schemas.brand import ClientCreate, ClientOut, HubOut, HubUpdate
+
+from app.services.presets import CATALOG
 
 router = APIRouter(prefix="/clients", tags=["clients"])
 
@@ -22,7 +24,7 @@ def _get_client(db: Session, agency: Agency, client_id: uuid.UUID) -> Client:
     return client
 
 
-@router.post("", response_model=ClientOut, status_code=201)
+@router.post("", response_model=ClientOut, status_code=201, dependencies=[Depends(require_admin)])
 def create_client(
     payload: ClientCreate,
     agency: Agency = Depends(get_agency),
@@ -46,7 +48,7 @@ def list_clients(agency: Agency = Depends(get_agency), db: Session = Depends(get
     ).all()
 
 
-@router.delete("/{client_id}", status_code=204)
+@router.delete("/{client_id}", status_code=204, dependencies=[Depends(require_admin)])
 def delete_client(
     client_id: uuid.UUID,
     agency: Agency = Depends(get_agency),
@@ -67,7 +69,7 @@ def get_hub(
     return HubOut.model_validate(client.hub)
 
 
-@router.put("/{client_id}/hub", response_model=HubOut)
+@router.put("/{client_id}/hub", response_model=HubOut, dependencies=[Depends(require_admin)])
 def update_hub(
     client_id: uuid.UUID,
     payload: HubUpdate,
@@ -80,6 +82,11 @@ def update_hub(
         hub = BrandHub()
         client.hub = hub
 
+    if "preset_ids" in payload.model_fields_set:
+        preset_ids = list(dict.fromkeys(payload.preset_ids))
+        if any(preset_id not in CATALOG for preset_id in preset_ids):
+            raise HTTPException(422, "Unknown compliance preset")
+        hub.preset_ids = preset_ids
     hub.tone_description = payload.tone_description
     hub.audience = payload.audience
     hub.dos = payload.dos

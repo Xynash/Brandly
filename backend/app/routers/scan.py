@@ -9,6 +9,7 @@ from app.models import Agency
 from app.routers.clients import _get_client
 from app.schemas.scan import ScanIn, ScanOut, ViolationOut
 from app.services.compliance import scan_text
+from app.services.presets import effective_terms
 
 router = APIRouter(prefix="/clients", tags=["scan"])
 
@@ -22,8 +23,7 @@ def scan(
 ):
     """Check any text against this client's banned words. Powers the standalone scanner page."""
     client = _get_client(db, agency, client_id)
-    words = client.hub.banned_words if client.hub else []
-    result = scan_text(payload.text, [(w.word, w.severity) for w in words])
+    result = scan_text(payload.text, effective_terms(client.hub))
     return ScanOut(
         passed=result.passed,
         score=result.score,

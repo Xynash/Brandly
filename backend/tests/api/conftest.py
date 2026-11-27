@@ -7,6 +7,7 @@ TEST_URL = os.environ.get(
 )
 os.environ["DATABASE_URL"] = TEST_URL
 os.environ["LLM_PROVIDER"] = "mock"
+os.environ["AUTH_MODE"] = "development"
 os.environ["GEMINI_API_KEY"] = ""
 
 import psycopg  # noqa: E402

@@ -1,12 +1,14 @@
+import json
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.core.db import get_db
-from app.core.deps import get_agency
+from app.core.db import SessionLocal, get_db
+from app.core.deps import Actor, get_actor, get_agency
 from app.models import Agency, Template
 from app.routers.clients import _get_client
 from app.schemas.generate import GenerateIn, GenerateOut
@@ -15,6 +17,7 @@ from app.services.context import build_context
 from app.services.generation import generate_checked
 from app.services.history import save_generation
 from app.services.llm import LLMError, get_provider
+from app.services.provider_keys import KeyConfigurationError, load_key
 from app.services.ratelimit import SlidingWindowLimiter
 from app.services.templating import MissingVariables, render
 
@@ -34,16 +37,12 @@ def _rate_limit(agency: Agency = Depends(get_agency)) -> None:
         )
 
 
-@router.post("/{client_id}/generate", response_model=GenerateOut, dependencies=[Depends(_rate_limit)])
-def generate(
+def _prepare(
     client_id: uuid.UUID,
     payload: GenerateIn,
-    agency: Agency = Depends(get_agency),
-    db: Session = Depends(get_db),
+    agency: Agency,
+    db: Session,
 ):
-    """Build the client's prompt, call the model, scan the draft, retry once if needed, save it.
-
-    The task is either given directly, or rendered from a template plus the writer's values."""
     client = _get_client(db, agency, client_id)
 
     if payload.template_id is not None:
@@ -60,27 +59,85 @@ def generate(
         task = payload.task
 
     ctx, banned = build_context(client)
-    agency_id, client_id_value = agency.id, client.id  # copy out before the session is released
-    db.close()  # everything needed is copied out; free the DB connection before the slow model call
-
     try:
-        result = generate_checked(get_provider(), ctx, task, banned)
+        api_key = load_key(db, agency.id)
+    except KeyConfigurationError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    return ctx, banned, task, api_key
+
+
+def _generate(prepared, agency_id, client_id, template_id, user_id) -> GenerateOut:
+    ctx, banned, task, api_key = prepared
+    try:
+        provider = get_provider(api_key) if api_key else get_provider()
+        result = generate_checked(provider, ctx, task, banned)
     except LLMError as exc:
         raise HTTPException(status_code=502, detail=str(exc))
-    generation_id = save_generation(
-        db,
-        agency_id=agency_id,
-        client_id=client_id_value,
-        template_id=payload.template_id,
-        task=task,
-        result=result,
-    )
+    with SessionLocal() as db:
+        generation_id = save_generation(
+            db,
+            agency_id=agency_id,
+            client_id=client_id,
+            template_id=template_id,
+            task=task,
+            result=result,
+            user_id=user_id,
+        )
     return GenerateOut(
         id=generation_id,
-        text=result.text,
+        text=None if result.flagged else result.text,
         passed=result.scan.passed,
         flagged=result.flagged,
         attempts=result.attempts,
         score=result.scan.score,
         violations=[ViolationOut(**v.__dict__) for v in result.scan.violations],
+    )
+
+
+@router.post("/{client_id}/generate", response_model=GenerateOut, dependencies=[Depends(_rate_limit)])
+def generate(
+    client_id: uuid.UUID,
+    payload: GenerateIn,
+    actor: Actor = Depends(get_actor),
+    db: Session = Depends(get_db),
+):
+    prepared = _prepare(client_id, payload, actor.agency, db)
+    agency_id = actor.agency.id
+    db.close()
+    return _generate(prepared, agency_id, client_id, payload.template_id, actor.user_id)
+
+
+@router.post(
+    "/{client_id}/generate/stream",
+    response_class=StreamingResponse,
+    dependencies=[Depends(_rate_limit)],
+    responses={200: {"content": {"text/event-stream": {}}}},
+)
+def stream_generation(
+    client_id: uuid.UUID,
+    payload: GenerateIn,
+    actor: Actor = Depends(get_actor),
+    db: Session = Depends(get_db),
+):
+    prepared = _prepare(client_id, payload, actor.agency, db)
+    agency_id = actor.agency.id
+    db.close()
+
+    def events():
+        yield 'event: started\ndata: {}\n\n'
+        try:
+            result = _generate(prepared, agency_id, client_id, payload.template_id, actor.user_id)
+        except HTTPException as exc:
+            data = json.dumps({"status": exc.status_code, "detail": exc.detail})
+            yield f"event: error\ndata: {data}\n\n"
+            return
+        if result.flagged:
+            data = result.model_dump_json(exclude={"text", "violations"})
+            yield f"event: review_required\ndata: {data}\n\n"
+        else:
+            yield f"event: completed\ndata: {result.model_dump_json()}\n\n"
+
+    return StreamingResponse(
+        events(), media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

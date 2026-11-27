@@ -2,6 +2,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import DateTime, ForeignKey, String, Text, UniqueConstraint, Uuid, func
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.db import Base
@@ -18,6 +19,7 @@ class BrandHub(Base):
     audience: Mapped[str] = mapped_column(Text, default="")
     dos: Mapped[str] = mapped_column(Text, default="")
     donts: Mapped[str] = mapped_column(Text, default="")
+    preset_ids: Mapped[list[str]] = mapped_column(JSONB, default=list, server_default="[]")
     sample_content: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

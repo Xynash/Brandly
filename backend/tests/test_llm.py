@@ -1,6 +1,7 @@
+import httpx
 import pytest
 
-from app.services.llm import GeminiProvider, LLMError
+from app.services.llm import GeminiProvider, HTTPProvider, LLMError
 
 
 class Boom(Exception):
@@ -112,3 +113,30 @@ def test_a_later_hard_error_still_mentions_the_earlier_failure():
     with pytest.raises(LLMError) as exc:
         p.generate("sys", "user")
     assert "error 400" in str(exc.value) and "error 503" in str(exc.value)
+
+
+@pytest.mark.parametrize(("provider", "path", "payload"), [
+    ("openai", "/v1/responses", {
+        "output": [{"type": "reasoning"}, {"type": "message", "content": [
+            {"type": "output_text", "text": "Checked copy"},
+        ]}],
+    }),
+    ("anthropic", "/v1/messages", {
+        "content": [{"type": "text", "text": "Checked copy"}],
+    }),
+])
+def test_http_provider_sends_instructions_and_extracts_text(monkeypatch, provider, path, payload):
+    def post(url, *, headers, json, timeout, trust_env):
+        assert url.endswith(path)
+        assert json["model"] == "example-model"
+        assert timeout == 7 and trust_env is False
+        if provider == "openai":
+            assert headers["Authorization"] == "Bearer dummy"
+            assert json["instructions"] == "brand rules" and json["input"] == "task"
+        else:
+            assert headers["x-api-key"] == "dummy"
+            assert json["system"] == "brand rules" and json["messages"][0]["content"] == "task"
+        return httpx.Response(200, json=payload, request=httpx.Request("POST", url))
+
+    monkeypatch.setattr("app.services.llm.httpx.post", post)
+    assert HTTPProvider(provider, "dummy", "example-model", 7).generate("brand rules", "task") == "Checked copy"

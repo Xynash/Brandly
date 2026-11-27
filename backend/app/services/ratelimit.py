@@ -14,6 +14,7 @@ class SlidingWindowLimiter:
         self.window = window_seconds
         self._hits: dict[str, deque[float]] = defaultdict(deque)
         self._lock = Lock()
+        self._next_cleanup = float("-inf")
 
     def hit(self, key: str, limit: int, now: float | None = None) -> int | None:
         """Record a hit. Returns None if allowed, else the seconds to wait before retrying."""
@@ -21,6 +22,11 @@ class SlidingWindowLimiter:
             return math.ceil(self.window)
         now = time.monotonic() if now is None else now
         with self._lock:
+            if now >= self._next_cleanup:
+                cutoff = now - self.window
+                for expired in [key for key, hits in self._hits.items() if hits[-1] <= cutoff]:
+                    del self._hits[expired]
+                self._next_cleanup = now + self.window
             hits = self._hits[key]
             while hits and now - hits[0] >= self.window:
                 hits.popleft()

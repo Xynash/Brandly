@@ -18,6 +18,7 @@ class Generation(Base):
     agency_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("agencies.id", ondelete="CASCADE"))
     client_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("clients.id", ondelete="CASCADE"), index=True)
     template_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("templates.id", ondelete="SET NULL"))
+    user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     task: Mapped[str] = mapped_column(Text)  # the final task text (template already filled in)
     output: Mapped[str] = mapped_column(Text)
     passed: Mapped[bool] = mapped_column(Boolean)

@@ -12,6 +12,7 @@ class GenerationOut(BaseModel):
     id: uuid.UUID
     client_id: uuid.UUID
     template_id: uuid.UUID | None
+    user_id: uuid.UUID | None
     task: str
     output: str
     passed: bool
